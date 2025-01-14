@@ -1,6 +1,10 @@
 SRC_DIR := $(shell pwd)
+OS := $(shell uname -s)
+if [[ $(OS) == "Darwin" ]]; then
 UV_INC_DIR := /opt/homebrew/include
 UV_LIB_DIR := /opt/homebrew/lib
+fi
+
 BIN := $(SRC_DIR)/Downloader
 CC := gcc
 IFLAGS := $(addprefix -I, $(SRC_DIR))
