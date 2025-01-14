@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <uv.h>
 
 #define i64 int64_t
 #define u8 unsigned char
@@ -92,6 +93,11 @@ typedef struct __get
   char* _mode;
   char* checksum;
 } get_t;
+
+typedef struct __uvReqData
+{
+  i64 sid;
+} uvReqData;
 
 static i64 getFileSize(char* path);
 static i64 getLastAccessInterval(char* filename);
@@ -391,8 +397,7 @@ header_cb(const char* buffer, size_t size, size_t nitems, void* userdata)
 static res_t
 getBeatMap(get_t data)
 {
-  char url[256];
-  memset(url, 0, sizeof(url));
+  char* url = (char*)calloc(256, sizeof(char));
   sprintf(url, "https://txy1.sayobot.cn/beatmaps/download/novideo/%d",
           data.sid);
   CURL* eh = curl_easy_init();
@@ -400,10 +405,8 @@ getBeatMap(get_t data)
     {
       assert(0);
     }
-  char escaped_filename[1024];
-  memset(escaped_filename, 0, sizeof(escaped_filename));
-
-  char tmp_filename[256];
+  char* escaped_filename = (char*)calloc(1024, sizeof(escaped_filename));
+  char* tmp_filename = (char*)calloc(256, sizeof(char));
   sprintf(tmp_filename, "%d.osz", data.sid);
   FILE* fp = fopen(tmp_filename, "w+");
 
@@ -429,6 +432,10 @@ getBeatMap(get_t data)
   assert(r == 0);
   curl_free(filename);
   curl_easy_cleanup(eh);
+
+  free(escaped_filename);
+  free(tmp_filename);
+  free(url);
   return res;
 }
 
@@ -441,9 +448,32 @@ destroyRes(res_t res)
     }
 }
 
+void
+downloadMap(uv_work_t* req)
+{
+  uvReqData* data = (uvReqData*)req->data;
+  i64 sid = data->sid;
+
+  get_t getData = {
+    .sid = sid,
+  };
+
+  // Get: https://txy1.sayobot.cn/beatmaps/download/[novideo]or[full]/SID
+  getBeatMap(getData);
+}
+
+void
+postDownload(uv_work_t* req, int status)
+{
+  free(req->data);
+}
+
 int
 main(void)
 {
+  // Consider: uv_default_loop
+  uv_loop_t* loop = uv_default_loop();
+
   int uid;
   printf("Input the uid you want to get beatmap from: ");
   scanf("%d", &uid);
@@ -468,47 +498,48 @@ main(void)
       fclose(fp);
     }
 
-  int stack[100];
-  int sp = 0;
-  memset(stack, 0, sizeof(stack));
+  // int stack[100];
+  // int sp = 0;
+  // memset(stack, 0, sizeof(stack));
 
   // Get: Parse JSON return msg
   cJSON* root = cJSON_Parse(res.response_body);
   i64 itemCount = cJSON_GetArraySize(root);
+
+  // Consider: uv_work
+  uv_work_t req[100];
+  size_t counter = 0;
+
   for(i64 i = 0; i < itemCount; i++)
     {
       // Get: Array[i].beatmap.beatmapset_id
       cJSON* instance = cJSON_GetArrayItem(root, i);
       cJSON* prop_beatmap = cJSON_GetObjectItem(instance, "beatmap");
       cJSON* prop_sid = cJSON_GetObjectItem(prop_beatmap, "beatmapset_id");
-      i64 sid = (i64)cJSON_GetNumberValue(prop_sid);
+
+      uvReqData* data = (uvReqData*)calloc(1, sizeof(uvReqData));
+      data->sid = (i64)cJSON_GetNumberValue(prop_sid);
 
       // Check: HashMap, DynamicExtend
-      i64 index = sid / 8;
-      i64 offset = sid % 8;
-
-      // Has been downloaded
+      i64 index = data->sid / 8;
+      i64 offset = data->sid % 8;
       if((u8)hashMap[index] & (u8)(0x1 << offset))
         {
           continue;
         }
       hashMap[index] |= (u8)(0x1 << offset);
-      stack[sp++] = sid;
+      req[counter].data = (void*)data;
+      uv_queue_work(loop, &req[counter], downloadMap, postDownload);
+      counter++;
     }
 
-  // Get: https://txy1.sayobot.cn/beatmaps/download/[novideo]or[full]/SID
-  while(sp)
-    {
-      int sid = stack[--sp];
-      get_t checkOut = {
-        .sid = sid,
-      };
-      getBeatMap(checkOut);
-    }
+  int uvStatus = uv_run(loop, UV_RUN_DEFAULT);
 
   // Output: HashMap Write Back
   FILE* f = fopen("hashMap", "w+");
   size_t wRes = fwrite(hashMap, sizeof(u8), 10 * 1024 * 1024, f);
   assert(wRes == 10 * 1024 * 1024);
   destroyRes(res);
+
+  return uvStatus;
 }
