@@ -1,13 +1,17 @@
-SRC_DIR := $(shell pwd)
-OS := $(shell uname -s)
-if [[ $(OS) == "Darwin" ]]; then
-UV_INC_DIR := /opt/homebrew/include
-UV_LIB_DIR := /opt/homebrew/lib
-fi
+ROOT_DIR := .
+INC_DIR := $(ROOT_DIR)/inc
+SRC_DIR := $(ROOT_DIR)/src
 
-BIN := $(SRC_DIR)/Downloader
+OS := $(shell uname -s)
+ifeq ($(OS), Darwin)
+	UV_INC_DIR := /opt/homebrew/include
+	UV_LIB_DIR := /opt/homebrew/lib
+endif
+
+BIN := $(ROOT_DIR)/Downloader
 CC := gcc
-IFLAGS := $(addprefix -I, $(SRC_DIR))
+IFLAGS := $(addprefix -I, $(shell find $(INC_DIR) -type d))
+IFLAGS += $(addprefix -I, $(INC_DIR))
 IFLAGS += $(addprefix -I, $(UV_INC_DIR))
 LFLAGS := $(addprefix -L, $(UV_LIB_DIR))
 LDFLAGS := $(addprefix -l, curl)
@@ -18,8 +22,8 @@ all: $(BIN)
 # Prerequisites is BIN so that BIN has to be compiled first
 
 $(BIN): $(CSRCS)
-	$(CC) $(CSRCS) $(IFLAGS) $(LFLAGS) $(LDFLAGS) -o $(BIN) -fsanitize=address
-
+	$(CC) $(CSRCS) $(IFLAGS) $(LFLAGS) $(LDFLAGS) -o $(BIN)  -Wno-deprecated-declarations -Wno-format
+# -fsanitize=address
 run: $(BIN)
 	@$^
 
